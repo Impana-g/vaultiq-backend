@@ -8,6 +8,13 @@ from models import UploadSession, UploadedFile
 
 from PyPDF2 import PdfReader
 from openai import OpenAI
+from transformers import pipeline
+
+# Load model (runs once)
+classifier = pipeline(
+    "zero-shot-classification",
+    model="facebook/bart-large-mnli"
+)
 
 # Load environment variables
 load_dotenv()
@@ -52,31 +59,43 @@ def extract_text_from_pdf(file_path):
         return ""
 
 # GENAI CLASSIFICATION
-
 def classify_document(text, filename):
-    combined = (text + " " + filename).lower()
+    combined = (text + " " + filename)
 
-    # 🔹 Financial keywords
-    financial_keywords = [
-        "invoice", "payment", "amount", "balance", "bank",
-        "transaction", "bill", "salary", "profit", "loss"
-    ]
+    labels = ["financial", "legal", "general"]
 
-    # 🔹 Legal keywords
-    legal_keywords = [
-        "agreement", "contract", "law", "legal",
-        "compliance", "terms", "nda", "policy"
-    ]
+    try:
+        # 🔹 Try GenAI (transformers)
+        result = classifier(combined[:1000], labels)
+        predicted = result["labels"][0]
+        print("AI RESULT:", predicted)
+        return predicted
 
-    f_score = sum(word in combined for word in financial_keywords)
-    l_score = sum(word in combined for word in legal_keywords)
+    except Exception as e:
+        print("AI failed, using fallback:", e)
 
-    if f_score > l_score and f_score > 0:
-        return "financial"
-    elif l_score > f_score and l_score > 0:
-        return "legal"
-    else:
-        return "general"
+        # 🔹 Fallback to keyword logic
+        combined = combined.lower()
+
+        financial_keywords = [
+            "invoice", "payment", "amount", "balance", "bank",
+            "transaction", "bill", "salary", "profit", "loss"
+        ]
+
+        legal_keywords = [
+            "agreement", "contract", "law", "legal",
+            "compliance", "terms", "nda", "policy"
+        ]
+
+        f_score = sum(word in combined for word in financial_keywords)
+        l_score = sum(word in combined for word in legal_keywords)
+
+        if f_score > l_score and f_score > 0:
+            return "financial"
+        elif l_score > f_score and l_score > 0:
+            return "legal"
+        else:
+            return "general"
 
 # HOME API
 @app.get("/")
