@@ -1,32 +1,31 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 import os
-
-from database import engine, SessionLocal
-import models
-from models import UploadSession, UploadedFile
 from sqlalchemy.orm import Session
+from dotenv import load_dotenv
 
-# 📄 PDF Reader
+from database import engine, SessionLocal, Base
+from models import UploadSession, UploadedFile
+
 from PyPDF2 import PdfReader
+from openai import OpenAI
 
-# 🔐 API Key (optional)
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# Load environment variables
+load_dotenv()
+print("API KEY:", os.getenv("OPENAI_API_KEY"))  
 
-client = None
-if OPENAI_API_KEY:
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)
-    except Exception as e:
-        print("OpenAI init error:", e)
+# OpenAI client
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ✅ Create app
-app = FastAPI()
+# Create FastAPI app
+app = FastAPI(title="VaultIQ Backend")
 
-# ✅ Create tables
-models.Base.metadata.create_all(bind=engine)
+# Create DB tables
+Base.metadata.create_all(bind=engine)
 
-# ✅ DB dependency
+
+
+# DB Dependency
+
 def get_db():
     db = SessionLocal()
     try:
@@ -34,76 +33,77 @@ def get_db():
     finally:
         db.close()
 
-# 📄 Extract text from PDF
+
+
+# PDF TEXT EXTRACTION
+
 def extract_text_from_pdf(file_path):
     try:
         reader = PdfReader(file_path)
-        text = ""
 
-        for page in reader.pages:
-            text += page.extract_text() or ""
+        if len(reader.pages) == 0:
+            return ""
 
-        return text[:1000]
+        text = reader.pages[0].extract_text() or ""
+        return text[:2000]
+
     except Exception as e:
         print("PDF ERROR:", e)
         return ""
 
-# ✅ Categorisation (Balanced fallback)
-def classify_document(text):
-    text_lower = text.lower()
+# GENAI CLASSIFICATION
 
-    def fallback():
-        # ✅ STRICT financial keywords
-        if any(word in text_lower for word in [
-            "finance", "financial", "balance sheet", "invoice", "tax", "revenue"
-        ]):
-            return "financial"
+def classify_document(text, filename):
+    combined = (text + " " + filename).lower()
 
-        # ✅ legal keywords
-        elif any(word in text_lower for word in [
-            "agreement", "contract", "law", "legal"
-        ]):
-            return "legal"
+    # 🔹 Financial keywords
+    financial_keywords = [
+        "invoice", "payment", "amount", "balance", "bank",
+        "transaction", "bill", "salary", "profit", "loss"
+    ]
 
-        else:
-            return "general"
+    # 🔹 Legal keywords
+    legal_keywords = [
+        "agreement", "contract", "law", "legal",
+        "compliance", "terms", "nda", "policy"
+    ]
 
-    # 🤖 AI (optional)
-    if client:
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{
-                    "role": "user",
-                    "content": f"Classify into: financial, legal, or general.\n\n{text[:500]}"
-                }]
-            )
-            return response.choices[0].message.content.strip().lower()
-        except Exception as e:
-            print("AI ERROR:", e)
-            return fallback()
+    f_score = sum(word in combined for word in financial_keywords)
+    l_score = sum(word in combined for word in legal_keywords)
 
-    return fallback()
+    if f_score > l_score and f_score > 0:
+        return "financial"
+    elif l_score > f_score and l_score > 0:
+        return "legal"
+    else:
+        return "general"
 
-# ✅ Home API
+# HOME API
 @app.get("/")
 def home():
     return {"message": "VaultIQ Backend Running"}
 
-# ✅ Upload + Process API
-@app.post("/api/v1/dev/process")
-def dev_upload():
-    db = SessionLocal()
 
-    folder = r"C:\Users\Impana\OneDrive\Desktop\vaultiq-backend\mp_materials"
+# MAIN PROCESS API
+
+@app.post("/api/v1/dev/process")
+def dev_process(db: Session = Depends(get_db)):
+
+    folder = os.getenv("MATERIALS_FOLDER", "./mp_materials")
 
     if not os.path.exists(folder):
-        return {"error": "Folder not found"}
+        raise HTTPException(status_code=400, detail="Folder not found")
 
-    files = os.listdir(folder)
+    files = [f for f in os.listdir(folder) if f.endswith(".pdf")]
+
+    if not files:
+        raise HTTPException(status_code=400, detail="No PDF files found")
 
     # Create session
-    session = UploadSession(file_count=len(files))
+    session = UploadSession(
+        file_count=len(files),
+        status="processing"
+    )
     db.add(session)
     db.commit()
     db.refresh(session)
@@ -111,35 +111,38 @@ def dev_upload():
     result = []
 
     for file in files:
-        file_path = os.path.join(folder, file)
+        try:
+            file_path = os.path.join(folder, file)
 
-        # 📄 Extract text
-        text = extract_text_from_pdf(file_path)
+            # Extract text
+            text = extract_text_from_pdf(file_path)
 
-        print("EXTRACTED TEXT:", text[:200])
+            if len(text.strip()) < 20:
+                text = file.lower()
 
-        # ✅ SMART INPUT SELECTION (NO OVER-COMBINE)
-        if text.strip() == "" or len(text.strip()) < 30:
-            final_text = file.lower()
-        else:
-            final_text = text.lower()
+            # Classify (GenAI)
+            category = classify_document(text, file)
 
-        # Categorise
-        category = classify_document(final_text)
+            new_file = UploadedFile(
+                session_id=session.id,
+                file_name=file,
+                category=category,
+                status="completed"
+            )
 
-        new_file = UploadedFile(
-            session_id=session.id,
-            file_name=file,
-            category=category
-        )
+            db.add(new_file)
 
-        db.add(new_file)
+            result.append({
+                "file_name": file,
+                "category": category
+            })
 
-        result.append({
-            "file_name": file,
-            "category": category
-        })
+        except Exception as file_error:
+            print("File Error:", file_error)
 
+    db.commit()
+
+    session.status = "completed"
     db.commit()
 
     return {
@@ -147,7 +150,10 @@ def dev_upload():
         "files": result
     }
 
-# ✅ Status API
+
+
+# STATUS API
+
 @app.get("/api/v1/process/{session_id}/status")
 def get_status(session_id: str, db: Session = Depends(get_db)):
 
@@ -156,17 +162,26 @@ def get_status(session_id: str, db: Session = Depends(get_db)):
     ).first()
 
     if not session:
-        return {"error": "Session not found"}
+        raise HTTPException(status_code=404, detail="Session not found")
 
-    total_files = session.file_count
-
-    categorized_files = db.query(UploadedFile).filter(
+    files = db.query(UploadedFile).filter(
         UploadedFile.session_id == session_id
-    ).count()
+    ).all()
+
+    processed = sum(1 for f in files if f.status == "completed")
+
+    total = session.file_count
+
+    if processed == 0:
+        status = "pending"
+    elif processed < total:
+        status = "processing"
+    else:
+        status = "completed"
 
     return {
         "session_id": session_id,
-        "total_files": total_files,
-        "categorized_files": categorized_files,
-        "status": "completed"
+        "total_files": total,
+        "processed_files": processed,
+        "status": status
     }
