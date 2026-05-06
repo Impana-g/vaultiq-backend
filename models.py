@@ -1,7 +1,7 @@
 import uuid
 import enum
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Enum as SAEnum
+from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Enum as SAEnum, Boolean
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -65,3 +65,15 @@ class FileProcessingResult(Base):
     created_at    = Column(DateTime, default=datetime.utcnow)
 
     file = relationship("UploadedFile", back_populates="results")
+
+
+# ── User (JWT Auth) ───────────────────────────────────────────────────────────
+class User(Base):
+    __tablename__ = "users"
+
+    id              = Column(String, primary_key=True, default=_uuid)
+    username        = Column(String, unique=True, nullable=False, index=True)
+    email           = Column(String, unique=True, nullable=False, index=True)
+    hashed_password = Column(String, nullable=False)
+    is_active       = Column(Boolean, default=True)
+    created_at      = Column(DateTime, default=datetime.utcnow)

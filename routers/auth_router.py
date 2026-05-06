@@ -1,24 +1,24 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from auth import hash_password, verify_password, create_access_token, get_db
+from auth import hash_password, verify_password, create_access_token, get_db, get_current_user
 from models import User
 from schemas import UserCreate, UserOut, Token
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
 
+
 @router.post("/register", response_model=UserOut, status_code=201)
 def register(user_in: UserCreate, db: Session = Depends(get_db)):
-    # Check duplicates
     if db.query(User).filter(User.username == user_in.username).first():
         raise HTTPException(status_code=400, detail="Username already taken")
     if db.query(User).filter(User.email == user_in.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user = User(
-        username=user_in.username,
-        email=user_in.email,
-        hashed_password=hash_password(user_in.password),
+        username        = user_in.username,
+        email           = user_in.email,
+        hashed_password = hash_password(user_in.password),
     )
     db.add(user)
     db.commit()
@@ -43,5 +43,5 @@ def login(
 
 
 @router.get("/me", response_model=UserOut)
-def me(current_user: User = Depends(get_current_user_dependency)):
+def me(current_user: User = Depends(get_current_user)):
     return current_user
