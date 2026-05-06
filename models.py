@@ -27,7 +27,7 @@ class DDCategory(str, enum.Enum):
 class UploadSession(Base):
     __tablename__ = "upload_sessions"
 
-    id                = Column(String, primary_key=True, default=_uuid)
+    id                = Column(String(36), primary_key=True, default=_uuid)
     status            = Column(SAEnum(SessionStatus), default=SessionStatus.pending)
     file_count        = Column(Integer, default=0)
     categorized_count = Column(Integer, default=0)
@@ -41,9 +41,9 @@ class UploadSession(Base):
 class UploadedFile(Base):
     __tablename__ = "uploaded_files"
 
-    id            = Column(String, primary_key=True, default=_uuid)
-    session_id    = Column(String, ForeignKey("upload_sessions.id"), nullable=False)
-    file_name     = Column(String, nullable=False)
+    id            = Column(String(36), primary_key=True, default=_uuid)
+    session_id    = Column(String(36), ForeignKey("upload_sessions.id"), nullable=False)
+    file_name     = Column(String(255), nullable=False)
     category      = Column(SAEnum(DDCategory), default=DDCategory.uncategorized)
     error_message = Column(Text, nullable=True)
     created_at    = Column(DateTime, default=datetime.utcnow)
@@ -55,12 +55,12 @@ class UploadedFile(Base):
 class FileProcessingResult(Base):
     __tablename__ = "file_processing_results"
 
-    id            = Column(String, primary_key=True, default=_uuid)
-    file_id       = Column(String, ForeignKey("uploaded_files.id"), nullable=False)
-    result_type   = Column(String, nullable=False)
+    id            = Column(String(36), primary_key=True, default=_uuid)
+    file_id       = Column(String(36), ForeignKey("uploaded_files.id"), nullable=False)
+    result_type   = Column(String(50), nullable=False)
     question      = Column(Text, nullable=True)
     answer        = Column(Text, nullable=False)
-    ai_model_used = Column(String, nullable=True)
+    ai_model_used = Column(String(100), nullable=True)
     tokens_used   = Column(Integer, nullable=True)
     created_at    = Column(DateTime, default=datetime.utcnow)
 
@@ -71,9 +71,9 @@ class FileProcessingResult(Base):
 class User(Base):
     __tablename__ = "users"
 
-    id              = Column(String, primary_key=True, default=_uuid)
-    username        = Column(String, unique=True, nullable=False, index=True)
-    email           = Column(String, unique=True, nullable=False, index=True)
-    hashed_password = Column(String, nullable=False)
+    id              = Column(String(36), primary_key=True, default=_uuid)
+    username        = Column(String(100), unique=True, nullable=False, index=True)
+    email           = Column(String(255), unique=True, nullable=False, index=True)
+    hashed_password = Column(String(255), nullable=False)
     is_active       = Column(Boolean, default=True)
     created_at      = Column(DateTime, default=datetime.utcnow)
