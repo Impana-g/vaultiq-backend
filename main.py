@@ -7,6 +7,17 @@ from PyPDF2 import PdfReader
 import os
 import logging
 
+from routers import auth_router
+from auth import get_current_user
+from models import User
+from auth import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    get_db,
+    get_current_user
+)
+
 load_dotenv()
 
 from database import engine, SessionLocal, Base
@@ -18,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="VaultIQ Backend", version="1.0.0")
+app.include_router(auth_router.router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -433,7 +445,11 @@ def get_status(session_id: str, db: Session = Depends(get_db)):
 
 # ── 3. Ask a question (Map-Reduce Q&A) ───────────────────────────────────────
 @app.post("/api/v1/ask")
-def ask(req: QuestionRequest, db: Session = Depends(get_db)):
+def ask(
+    req: QuestionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     folder = MATERIALS_FOLDER
 
     if not os.path.exists(folder):
